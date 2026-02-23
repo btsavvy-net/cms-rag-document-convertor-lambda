@@ -45,18 +45,40 @@ class OCRService:
         # Encode image
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
-        # Gateway request body
+        # ===============================
+        # STRICT OCR PROMPT (CRITICAL FIX)
+        # ===============================
         request_body = {
             "model_provider": "openai",
             "model_name": self.model_name,
+            "temperature": 0.0,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are an OCR engine. Extract readable text from images and return JSON only."
+                    "content": """
+You are a strict OCR extraction engine.
+
+Rules:
+1. Extract all readable text from the image.
+2. Return ONLY JSON.
+3. Never return explanations or markdown.
+4. If no text is found, return:
+{ "elements": [] }
+
+Output format MUST be exactly:
+
+{
+  "elements": [
+    {
+      "text": "extracted text here"
+    }
+  ]
+}
+"""
                 },
                 {
                     "role": "user",
-                    "content": "Extract all readable text from the image and return JSON format."
+                    "content": "Perform OCR extraction on the provided image."
                 }
             ],
             "image_base64": base64_image
@@ -139,7 +161,7 @@ class OCRService:
             return parsed.get("elements", [])
 
         except json.JSONDecodeError:
-            logger.error(f"OCR raw content invalid JSON: {content}")
+            logger.error("OCR raw content invalid JSON")
             raise RuntimeError("OCR response JSON decoding failed")
 
         except Exception as parse_error:
