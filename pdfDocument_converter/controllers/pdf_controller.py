@@ -1,4 +1,4 @@
-# pdf_controller.py
+# Document_controller.py
 
 from services.s3_service import download_pdf, upload_ir_jsonl
 from services.pdf_reader import read_pdf
@@ -12,17 +12,17 @@ logger = setup_logger(__name__)
 
 def process_pdf_message(message: dict):
     """
-    Main PDF processing controller for AWS Lambda.
+    Main Document processing controller for AWS Lambda.
 
     Steps:
-    1. Download PDF from S3
-    2. Extract all text/elements from PDF
+    1. Download Document from S3
+    2. Extract all text/elements from Document
     3. Upload IR JSONL.gz to S3
     4. Update DynamoDB with conversion status (status="converted")
     5. Publish SNS chunk request
     """
 
-    logger.info("PDF Controller started")
+    logger.info("Document Controller started")
 
     # Extract message data
     tenant_id = message["tenant_id"]
@@ -34,11 +34,11 @@ def process_pdf_message(message: dict):
     # -------------------------------
     # 1. Download PDF from S3
     # -------------------------------
-    logger.info(f"Downloading PDF from S3: {source_bucket}/{source_key}")
+    logger.info(f"Downloading Document from S3: {source_bucket}/{source_key}")
     pdf_bytes = download_pdf(source_bucket, source_key)
 
     # -------------------------------
-    # 2. Extract text/elements from PDF
+    # 2. Extract text/elements from Document
     # -------------------------------
     logger.info("Extracting text from PDF")
     elements = read_pdf(
@@ -99,5 +99,5 @@ def process_pdf_message(message: dict):
     )
     logger.info("SNS chunk request published successfully")
 
-    logger.info("PDF Controller completed successfully")
+    logger.info("Document Controller completed successfully")
     return {"ok": True}

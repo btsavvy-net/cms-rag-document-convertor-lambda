@@ -34,7 +34,7 @@ def handler(event, context):
     - dict → status message
     """
 
-    logger.info("PDF Converter Lambda started")
+    logger.info("Document Converter Lambda started")
 
     # SQS can batch multiple messages in one Lambda call
     records = event.get("Records", [])
@@ -84,9 +84,9 @@ def handler(event, context):
             logger.error("Failed to process SQS message", exc_info=True)
             raise error
 
-    logger.info("PDF Converter Lambda finished")
+    logger.info("Document Converter Lambda finished")
 
     return {
         "statusCode": 200,
-        "message": "PDF conversion completed successfully"
+        "message": "Document conversion completed successfully"
     }
