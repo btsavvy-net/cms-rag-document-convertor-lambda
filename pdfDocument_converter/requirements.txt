@@ -1,0 +1,14 @@
+# boto3
+# pymupdf
+# pdfplumber
+PyMuPDF==1.23.8
+pdfplumber==0.11.4
+camelot-py
+langdetect
+orjson
+openai>=1.0.0
+PyMuPDF
+
+
+
+# pytest

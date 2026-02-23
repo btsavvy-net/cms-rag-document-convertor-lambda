@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  PDF Converter Lambda (Python)
+
+Globals:
+  Function:
+    Timeout: 900
+    Runtime: python3.12
+    Architectures:
+      - x86_64
+    MemorySize: 4096
+
+Parameters:
+  StageName:
+    Description: stage / alias name to be used in this deploy
+    Type: String
+    AllowedValues:
+      - Dev
+      - QA
+    Default: Dev
+
+Mappings:
+  EnvMap:
+    Dev:
+      PDFSQSARN: arn:aws:sqs:us-east-2:395060586703:rag-dev-converter-pdf
+      DLQARN: arn:aws:sqs:us-east-2:395060586703:rag-dev-converter-pdf-dlq
+      DYNAMODBTABLENAME: RAG_DOCS
+      DOCSTABLEARN: arn:aws:dynamodb:us-east-2:395060586703:table/RAG_DOCS
+      RAWBUCKETNAME: rag-ingestion-raw-dev
+      RAWBUCKETARN: arn:aws:s3:::rag-ingestion-raw-dev/*
+      PROCESSEDBUCKETNAME: rag-dev-rag-processed
+      PROCESSEDBUCKETARN: arn:aws:s3:::rag-dev-rag-processed/*
+      SNSTOPICARN: arn:aws:sns:us-east-2:395060586703:rag-dev-chunk-request
+      AIGATEWAYLAMBDAARN: arn:aws:lambda:us-east-2:395060586703:function:AIGateway-Dev
+
+
+    QA:
+      PDFSQSARN: arn:aws:sqs:us-east-2:395060586703:rag-qa-converter-pdf
+      DLQARN: arn:aws:sqs:us-east-2:395060586703:rag-qa-converter-pdf-dlq
+      DYNAMODBTABLENAME: RAG_DOCS
+      DOCSTABLEARN: arn:aws:dynamodb:us-east-2:395060586703:table/RAG_DOCS
+      RAWBUCKETNAME: rag-ingestion-raw-qa
+      RAWBUCKETARN: arn:aws:s3:::rag-ingestion-raw-qa/*
+      PROCESSEDBUCKETNAME: rag-dev-rag-processed-qa
+      PROCESSEDBUCKETARN: arn:aws:s3:::rag-dev-rag-processed-qa/*
+      SNSTOPICARN: arn:aws:sns:us-east-2:395060586703:rag-qa-chunk-request
+      AIGATEWAYLAMBDAARN: arn:aws:lambda:us-east-2:395060586703:function:AIGateway-qa
+
+Resources:
+
+  RagPDFConverterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Join ["-", ["rag-convertor-pdf-lambda", !Ref StageName]]
+      Description: Converts PDFs to structured JSONL and publishes chunking requests
+      PackageType: Zip
+      CodeUri: pdfDocument_converter/
+      Handler: main.handler
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !FindInMap [EnvMap, !Ref StageName, DLQARN]
+      Environment:
+        Variables:
+          RAW_BUCKET_NAME: !FindInMap [EnvMap, !Ref StageName, RAWBUCKETNAME]
+          PROCESSED_BUCKET_NAME: !FindInMap [EnvMap, !Ref StageName, PROCESSEDBUCKETNAME]
+          DYNAMODB_TABLE_NAME: !FindInMap [EnvMap, !Ref StageName, DYNAMODBTABLENAME]
+          # MAX_PDF_PAGES: 2000
+          IR_SCHEMA_VERSION: ir_v1
+          WRITE_MD_SIDECAR: false
+          SNS_TOPIC_ARN: !FindInMap [EnvMap, !Ref StageName, SNSTOPICARN]
+          AI_GATEWAY_LAMBDA_ARN: !FindInMap [EnvMap, !Ref StageName, AIGATEWAYLAMBDAARN]
+
+      Events:
+        PDFSQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !FindInMap [EnvMap, !Ref StageName, PDFSQSARN]
+            BatchSize: 1
+
+      Policies:
+        - Statement:
+            - Sid: SQSAccess
+              Effect: Allow
+              Action:
+                - sqs:ReceiveMessage
+                - sqs:DeleteMessage
+                - sqs:GetQueueAttributes
+                - sqs:GetQueueUrl
+              Resource: !FindInMap [EnvMap, !Ref StageName, PDFSQSARN]
+            - Sid: SNSPublish
+              Effect: Allow
+              Action:
+                - sns:Publish
+              Resource: !FindInMap [EnvMap, !Ref StageName, SNSTOPICARN]
+            - Sid: DynamoDBAccess
+              Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:Query
+              Resource:
+                - !FindInMap [EnvMap, !Ref StageName, DOCSTABLEARN]
+            - Sid: S3Access
+              Effect: Allow
+              Action:
+                - s3:GetObject
+                - s3:PutObject
+                - s3:PutObjectTagging
+                - s3:HeadObject
+              Resource:
+                - !FindInMap [EnvMap, !Ref StageName, RAWBUCKETARN]
+                - !FindInMap [EnvMap, !Ref StageName, PROCESSEDBUCKETARN]
+            - Sid: InvokeAIGatewayLambda
+              Effect: Allow
+              Action:
+              - lambda:InvokeFunction
+              Resource: !FindInMap [EnvMap, !Ref StageName, AIGATEWAYLAMBDAARN]
+
+  RagPDFConverterFunctionLogGroup:
+    Type: AWS::Logs::LogGroup
+    DependsOn: RagPDFConverterFunction
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${RagPDFConverterFunction}"
+      RetentionInDays: 30

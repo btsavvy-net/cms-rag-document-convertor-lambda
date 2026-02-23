@@ -1,0 +1,47 @@
+import os
+# from dotenv import load_dotenv
+
+# Load .env only locally
+# if os.getenv("AWS_EXECUTION_ENV") is None:
+#     load_dotenv()
+
+AWS_REGION = (
+    os.getenv("AWS_REGION")
+    or os.getenv("AWS_DEFAULT_REGION")
+    or "us-east-2"
+)
+
+RAW_BUCKET_NAME = os.environ["RAW_BUCKET_NAME"]
+PROCESSED_BUCKET_NAME = os.environ["PROCESSED_BUCKET_NAME"]
+DYNAMODB_TABLE_NAME = os.environ["DYNAMODB_TABLE_NAME"]
+
+SNS_TOPIC_ARN = os.getenv("SNS_TOPIC_ARN", "")
+
+MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", "500"))
+IR_SCHEMA_VERSION = os.getenv("IR_SCHEMA_VERSION", "ir_v1")
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+WRITE_MD_SIDECAR = os.getenv("WRITE_MD_SIDECAR", "false").lower() == "true"
+# ✅ ADD THIS LINE ONLY
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+AI_GATEWAY_LAMBDA_ARN = os.getenv("AI_GATEWAY_LAMBDA_ARN", "")
+
+
+
+class Settings:
+    AWS_REGION = AWS_REGION
+    RAW_BUCKET_NAME = RAW_BUCKET_NAME
+    PROCESSED_BUCKET_NAME = PROCESSED_BUCKET_NAME
+    DYNAMODB_TABLE_NAME = DYNAMODB_TABLE_NAME
+    DOCS_TABLE = DYNAMODB_TABLE_NAME
+    SNS_TOPIC_ARN = SNS_TOPIC_ARN
+    MAX_PDF_PAGES = MAX_PDF_PAGES
+    IR_SCHEMA_VERSION = IR_SCHEMA_VERSION
+    LOG_LEVEL = LOG_LEVEL
+    WRITE_MD_SIDECAR = WRITE_MD_SIDECAR
+# ✅ ADD THIS ALSO
+    OPENAI_API_KEY = OPENAI_API_KEY
+    AI_GATEWAY_LAMBDA_ARN = AI_GATEWAY_LAMBDA_ARN
+
+
+
+settings = Settings()

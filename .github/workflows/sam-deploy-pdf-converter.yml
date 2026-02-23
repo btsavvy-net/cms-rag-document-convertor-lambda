@@ -1,0 +1,178 @@
+name: SAM CI/CD (PDF Converter → Dev)
+
+on:
+  push:
+    branches: [ "main" ]
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-east-2
+  DEV_ROLE_ARN: arn:aws:iam::395060586703:role/github-oidc-btsavvy-net   
+  STACK_NAME: rag-pdf-converter-Dev                                   
+  PYTHON_VERSION: "3.12"  # host Python; doesn't matter when using --use-container
+                          # If you insist on host builds, set this to "3.13" and remove --use-container.
+
+concurrency:
+  group: sam-pdf-converter-deploy
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC → dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEV_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gh-oidc-sam-build
+
+      - name: Set up Python (for tests/tools)
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-${{ env.PYTHON_VERSION }}-
+
+      - name: Install app deps (if any)
+        if: hashFiles('requirements.txt') != ''
+        run: pip install -r requirements.txt
+
+      - name: Install test deps (optional)
+        if: hashFiles('requirements-dev.txt') != ''
+        run: pip install -r requirements-dev.txt
+
+      - name: Run unit tests (optional)
+        if: hashFiles('tests/**') != ''
+        run: python -m pytest -q
+
+      - name: Install AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Validate SAM template (explicit region)
+        run: sam validate --region "${AWS_REGION}"
+
+        # sam clean
+      - name: Clean previous SAM build
+        run: |
+          echo "Cleaning old SAM build artifacts"
+          rm -rf .aws-sam
+      # 🔧 Fix: build in the AWS-provided container for python3.13
+      - name: SAM build (use container)
+        run: sam build --use-container
+      - name: Check Lambda build size (pre-slim)
+        run: |
+          echo "Function build size BEFORE slimming:"
+          du -sh .aws-sam/build/RagPDFConverterFunction
+      # #  SLIMMING STEP (for pyarrow)
+      # - name: Slim Lambda dependencies
+      #   run: |
+      #     echo "Locating python dependency directory..."
+      #     BUILD_DIR=$(find .aws-sam/build -type d -name "python" | head -n 1)
+
+      #     if [ -z "$BUILD_DIR" ]; then
+      #       echo "No python directory found, skipping slimming"
+      #       exit 0
+      #     fi
+
+      #     echo "Before slimming:"
+      #     du -sh "$BUILD_DIR"
+
+      #     # Remove tests, caches, metadata
+      #     rm -rf $BUILD_DIR/**/tests
+      #     rm -rf $BUILD_DIR/**/__pycache__
+      #     rm -rf $BUILD_DIR/**/*.dist-info/RECORD
+
+      #     # Strip debug symbols (huge win for pyarrow)
+      #     find $BUILD_DIR -name "*.so" -exec strip --strip-unneeded {} + || true
+
+      #     echo "After slimming:"
+      #     du -sh "$BUILD_DIR"
+
+      - name: Upload build artifacts (optional)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aws-sam-build
+          path: .aws-sam
+          if-no-files-found: ignore
+
+  deploy-dev:
+    needs: [ build ]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # If you want to reuse built artifacts, uncomment:
+      # - name: Download build artifacts
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: aws-sam-build
+      #     path: .aws-sam
+
+      - name: Configure AWS credentials (OIDC → dev)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.DEV_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          role-session-name: gh-oidc-sam-deploy-dev
+
+      - name: Install AWS SAM CLI
+        uses: aws-actions/setup-sam@v2
+
+      - name: Clean previous SAM build
+        run: |
+          echo "Cleaning old SAM build artifacts"
+          rm -rf .aws-sam
+          
+      # 🔧 Fix: container build here as well (simple & consistent)
+      - name: Build for deploy (use container)
+        run: sam build --use-container
+
+      # # SLIMMING AGAIN (deploy build)
+      # - name: Slim Lambda dependencies
+      #   run: |
+      #     echo "Locating python dependency directory..."
+      #     BUILD_DIR=$(find .aws-sam/build -type d -name "python" | head -n 1)
+
+      #     if [ -z "$BUILD_DIR" ]; then
+      #       echo "No python directory found, skipping slimming"
+      #       exit 0
+      #     fi
+
+      #     echo "Before slimming:"
+      #     du -sh "$BUILD_DIR"
+
+      #     rm -rf $BUILD_DIR/**/tests
+      #     rm -rf $BUILD_DIR/**/__pycache__
+      #     rm -rf $BUILD_DIR/**/*.dist-info/RECORD
+      #     find $BUILD_DIR -name "*.so" -exec strip --strip-unneeded {} + || true
+
+      #     echo "After slimming:"
+      #     du -sh "$BUILD_DIR"
+
+
+      - name: Deploy to dev
+        run: |
+          PARAMS="StageName=Dev"
+          sam deploy \
+            --stack-name "${STACK_NAME}" \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM CAPABILITY_NAMED_IAM CAPABILITY_AUTO_EXPAND \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --region "${AWS_REGION}" \
+            --parameter-overrides ${PARAMS}
