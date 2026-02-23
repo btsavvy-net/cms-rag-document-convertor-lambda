@@ -45,7 +45,7 @@ class OCRService:
         # Encode image
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
-        # Request payload for gateway lambda
+        # Gateway request body
         request_body = {
             "model_provider": "openai",
             "model_name": self.model_name,
@@ -110,7 +110,7 @@ class OCRService:
             raise RuntimeError(f"OCR failed with status {status_code}")
 
         # ===============================
-        # Parse OCR Response Body Safely
+        # Safe OCR Response Parsing
         # ===============================
         try:
             body = json.loads(result.get("body", "{}"))
@@ -120,14 +120,12 @@ class OCRService:
             if not choices:
                 raise RuntimeError("OCR response choices missing")
 
-            content = choices[0].get("message", {}).get("content", "")
+            content = choices[0].get("message", {}).get("content", "").strip()
 
             if not content:
                 raise RuntimeError("OCR response content empty")
 
-            # Remove markdown code fences if model returns them
-            content = content.strip()
-
+            # Remove markdown JSON fences if model returns them
             if content.startswith("```"):
                 content = content.replace("```json", "")
                 content = content.replace("```", "")
@@ -135,7 +133,14 @@ class OCRService:
 
             parsed = json.loads(content)
 
+            if not isinstance(parsed, dict):
+                raise RuntimeError("OCR response is not valid JSON object")
+
             return parsed.get("elements", [])
+
+        except json.JSONDecodeError:
+            logger.error(f"OCR raw content invalid JSON: {content}")
+            raise RuntimeError("OCR response JSON decoding failed")
 
         except Exception as parse_error:
             logger.error(
