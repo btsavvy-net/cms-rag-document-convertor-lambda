@@ -19,21 +19,18 @@ logger = setup_logger(__name__)
 
 class OCRService:
     def __init__(self):
-        # Lambda client to call AI Gateway Lambda
         self.lambda_client = boto3.client(
             "lambda",
             region_name=settings.AWS_REGION,
         )
 
-        # AI Gateway Lambda ARN
         self.lambda_arn = settings.AI_GATEWAY_LAMBDA_ARN
 
-        # Centralized model configuration
         self.model_name = "gpt-4o"
 
-    # ===============================
-    # OCR Extraction Function
-    # ===============================
+    # =========================================================
+    # OCR Extraction Function (Production Safe Version)
+    # =========================================================
     def extract_text_from_image(self, image_bytes: bytes):
         """
         Sends image to AI Gateway Lambda
@@ -42,11 +39,10 @@ class OCRService:
 
         logger.info("Invoking AI Gateway Lambda for OCR")
 
-        # Encode image
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
         # ===============================
-        # STRICT OCR PROMPT (CRITICAL FIX)
+        # STRICT OCR PROMPT (CRITICAL)
         # ===============================
         request_body = {
             "model_provider": "openai",
@@ -61,17 +57,16 @@ You are a strict OCR extraction engine.
 Rules:
 1. Extract all readable text from the image.
 2. Return ONLY JSON.
-3. Never return explanations or markdown.
-4. If no text is found, return:
+3. Do NOT explain anything.
+4. Do NOT return markdown.
+5. If no text is found, return:
 { "elements": [] }
 
-Output format MUST be exactly:
+Output format must be exactly:
 
 {
-  "elements": [
-    {
-      "text": "extracted text here"
-    }
+  "elements":[
+    {"text":"extracted text"}
   ]
 }
 """
@@ -84,7 +79,6 @@ Output format MUST be exactly:
             "image_base64": base64_image
         }
 
-        # Gateway wrapper payload
         payload = {
             "version": "2.0",
             "routeKey": "POST /v1/chat/completions",
@@ -121,9 +115,9 @@ Output format MUST be exactly:
             logger.error(f"AI Gateway Lambda invocation failed: {str(e)}")
             raise RuntimeError("OCR Lambda invocation failed") from e
 
-        # ===============================
+        # =========================================================
         # Response Validation
-        # ===============================
+        # =========================================================
         status_code = result.get("statusCode")
 
         if status_code != 200:
@@ -131,23 +125,25 @@ Output format MUST be exactly:
             logger.error(f"Full response: {result}")
             raise RuntimeError(f"OCR failed with status {status_code}")
 
-        # ===============================
-        # Safe OCR Response Parsing
-        # ===============================
+        # =========================================================
+        # Safe Response Parsing
+        # =========================================================
         try:
             body = json.loads(result.get("body", "{}"))
 
             choices = body.get("choices", [])
 
             if not choices:
-                raise RuntimeError("OCR response choices missing")
+                logger.warning("OCR response choices missing")
+                return []
 
             content = choices[0].get("message", {}).get("content", "").strip()
 
             if not content:
-                raise RuntimeError("OCR response content empty")
+                logger.warning("OCR response content empty")
+                return []
 
-            # Remove markdown JSON fences if model returns them
+            # Remove markdown fences if model returns them
             if content.startswith("```"):
                 content = content.replace("```json", "")
                 content = content.replace("```", "")
@@ -156,16 +152,17 @@ Output format MUST be exactly:
             parsed = json.loads(content)
 
             if not isinstance(parsed, dict):
-                raise RuntimeError("OCR response is not valid JSON object")
+                logger.warning("OCR response is not JSON object")
+                return []
 
             return parsed.get("elements", [])
 
         except json.JSONDecodeError:
             logger.error("OCR raw content invalid JSON")
-            raise RuntimeError("OCR response JSON decoding failed")
+            return []
 
         except Exception as parse_error:
             logger.error(
                 f"Failed to parse OCR response: {str(parse_error)}"
             )
-            raise RuntimeError("Invalid OCR response format") from parse_error
+            return []
