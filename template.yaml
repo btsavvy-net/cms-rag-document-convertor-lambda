@@ -23,7 +23,7 @@ Parameters:
 Mappings:
   EnvMap:
     Dev:
-      PDFSQSARN: arn:aws:sqs:us-east-2:395060586703:rag-dev-converter-ocr
+      PDFSQSARN: arn:aws:sqs:us-east-2:395060586703:rag-dev-converter-pdf
       DLQARN: arn:aws:sqs:us-east-2:395060586703:rag-dev-converter-pdf-dlq
       DYNAMODBTABLENAME: RAG_DOCS
       DOCSTABLEARN: arn:aws:dynamodb:us-east-2:395060586703:table/RAG_DOCS
