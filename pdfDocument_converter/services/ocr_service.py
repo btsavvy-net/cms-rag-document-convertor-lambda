@@ -25,10 +25,10 @@ class OCRService:
             region_name=settings.AWS_REGION,
         )
 
-        # AI Gateway Lambda ARN (must be configured in env)
+        # AI Gateway Lambda ARN
         self.lambda_arn = settings.AI_GATEWAY_LAMBDA_ARN
 
-        # Model name configured centrally
+        # Centralized model configuration
         self.model_name = "gpt-4o"
 
     # ===============================
@@ -42,27 +42,27 @@ class OCRService:
 
         logger.info("Invoking AI Gateway Lambda for OCR")
 
-        # Base64 encode image
+        # Encode image
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
-        # Gateway-compatible request body
+        # Request payload for gateway lambda
         request_body = {
             "model_provider": "openai",
             "model_name": self.model_name,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are an OCR engine. Extract readable text from images."
+                    "content": "You are an OCR engine. Extract readable text from images and return JSON only."
                 },
                 {
                     "role": "user",
-                    "content": "Extract all readable text from the provided image and return JSON format."
+                    "content": "Extract all readable text from the image and return JSON format."
                 }
             ],
             "image_base64": base64_image
         }
 
-        # API Gateway style wrapper payload
+        # Gateway wrapper payload
         payload = {
             "version": "2.0",
             "routeKey": "POST /v1/chat/completions",
@@ -89,6 +89,10 @@ class OCRService:
             )
 
             raw_payload = response["Payload"].read()
+
+            if not raw_payload:
+                raise RuntimeError("Empty OCR gateway response")
+
             result = json.loads(raw_payload)
 
         except Exception as e:
@@ -106,12 +110,28 @@ class OCRService:
             raise RuntimeError(f"OCR failed with status {status_code}")
 
         # ===============================
-        # Parse OCR Response Body
+        # Parse OCR Response Body Safely
         # ===============================
         try:
-            body = json.loads(result["body"])
+            body = json.loads(result.get("body", "{}"))
 
-            content = body["choices"][0]["message"]["content"]
+            choices = body.get("choices", [])
+
+            if not choices:
+                raise RuntimeError("OCR response choices missing")
+
+            content = choices[0].get("message", {}).get("content", "")
+
+            if not content:
+                raise RuntimeError("OCR response content empty")
+
+            # Remove markdown code fences if model returns them
+            content = content.strip()
+
+            if content.startswith("```"):
+                content = content.replace("```json", "")
+                content = content.replace("```", "")
+                content = content.strip()
 
             parsed = json.loads(content)
 
