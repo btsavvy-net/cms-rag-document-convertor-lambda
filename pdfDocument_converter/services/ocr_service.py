@@ -25,56 +25,44 @@ class OCRService:
             region_name=settings.AWS_REGION,
         )
 
-        # AI Gateway Lambda ARN (must be set in env variable)
+        # AI Gateway Lambda ARN (must be configured in env)
         self.lambda_arn = settings.AI_GATEWAY_LAMBDA_ARN
 
         # Model name configured centrally
         self.model_name = "gpt-4o"
 
+    # ===============================
+    # OCR Extraction Function
+    # ===============================
     def extract_text_from_image(self, image_bytes: bytes):
         """
         Sends image to AI Gateway Lambda
         Returns OCR extracted elements
         """
 
+        logger.info("Invoking AI Gateway Lambda for OCR")
+
+        # Base64 encode image
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
-        # 🔥 Prepare request body (what AI Gateway expects)
+        # Gateway-compatible request body
         request_body = {
             "model_provider": "openai",
             "model_name": self.model_name,
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are an OCR engine. Extract all readable text from the image and return JSON."
+                    "content": "You are an OCR engine. Extract readable text from images."
                 },
                 {
                     "role": "user",
-                    "content": [
-                        {
-                            "type": "text",
-                            "text": """
-Return strictly JSON:
-
-{
-  "elements": [
-    { "text": "extracted text here" }
-  ]
-}
-"""
-                        },
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:image/png;base64,{base64_image}"
-                            }
-                        }
-                    ]
+                    "content": "Extract all readable text from the provided image and return JSON format."
                 }
-            ]
+            ],
+            "image_base64": base64_image
         }
 
-        # 🔥 API Gateway style payload (as per your team standard)
+        # API Gateway style wrapper payload
         payload = {
             "version": "2.0",
             "routeKey": "POST /v1/chat/completions",
@@ -94,8 +82,6 @@ Return strictly JSON:
         }
 
         try:
-            logger.info("Invoking AI Gateway Lambda for OCR")
-
             response = self.lambda_client.invoke(
                 FunctionName=self.lambda_arn,
                 InvocationType="RequestResponse",
@@ -109,6 +95,9 @@ Return strictly JSON:
             logger.error(f"AI Gateway Lambda invocation failed: {str(e)}")
             raise RuntimeError("OCR Lambda invocation failed") from e
 
+        # ===============================
+        # Response Validation
+        # ===============================
         status_code = result.get("statusCode")
 
         if status_code != 200:
@@ -116,10 +105,12 @@ Return strictly JSON:
             logger.error(f"Full response: {result}")
             raise RuntimeError(f"OCR failed with status {status_code}")
 
+        # ===============================
+        # Parse OCR Response Body
+        # ===============================
         try:
             body = json.loads(result["body"])
 
-            # Expecting OpenAI-style response
             content = body["choices"][0]["message"]["content"]
 
             parsed = json.loads(content)
@@ -127,5 +118,7 @@ Return strictly JSON:
             return parsed.get("elements", [])
 
         except Exception as parse_error:
-            logger.error(f"Failed to parse OCR response: {str(parse_error)}")
+            logger.error(
+                f"Failed to parse OCR response: {str(parse_error)}"
+            )
             raise RuntimeError("Invalid OCR response format") from parse_error
