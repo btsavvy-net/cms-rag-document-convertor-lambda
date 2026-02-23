@@ -1,4 +1,4 @@
-name: SAM CI/CD (PDF Converter → Dev)
+name: SAM CI/CD (Document Converter → Dev)
 
 on:
   push:
@@ -11,12 +11,12 @@ permissions:
 env:
   AWS_REGION: us-east-2
   DEV_ROLE_ARN: arn:aws:iam::395060586703:role/github-oidc-btsavvy-net   
-  STACK_NAME: rag-pdf-converter-Dev                                   
+  STACK_NAME: rag-document-converter-Dev                                   
   PYTHON_VERSION: "3.12"  # host Python; doesn't matter when using --use-container
                           # If you insist on host builds, set this to "3.13" and remove --use-container.
 
 concurrency:
-  group: sam-pdf-converter-deploy
+  group: sam-document-converter-deploy
   cancel-in-progress: false
 
 jobs:
@@ -75,7 +75,7 @@ jobs:
       - name: Check Lambda build size (pre-slim)
         run: |
           echo "Function build size BEFORE slimming:"
-          du -sh .aws-sam/build/RagPDFConverterFunction
+          du -sh .aws-sam/build/RagDocumentConverterFunction
       # #  SLIMMING STEP (for pyarrow)
       # - name: Slim Lambda dependencies
       #   run: |

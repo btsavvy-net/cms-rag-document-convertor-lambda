@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  PDF Converter Lambda (Python)
+  PDF Doument Converter Lambda (Python)
 
 Globals:
   Function:
@@ -49,10 +49,10 @@ Mappings:
 
 Resources:
 
-  RagPDFConverterFunction:
+  RagDocumentConverterFunction:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Join ["-", ["rag-convertor-pdf-lambda", !Ref StageName]]
+      FunctionName: !Join ["-", ["rag-document-convertor-lambda", !Ref StageName]]
       Description: Converts PDFs to structured JSONL and publishes chunking requests
       PackageType: Zip
       CodeUri: pdfDocument_converter/
@@ -118,9 +118,9 @@ Resources:
               - lambda:InvokeFunction
               Resource: !FindInMap [EnvMap, !Ref StageName, AIGATEWAYLAMBDAARN]
 
-  RagPDFConverterFunctionLogGroup:
+  RagDocumentConverterFunctionLogGroup:
     Type: AWS::Logs::LogGroup
-    DependsOn: RagPDFConverterFunction
+    DependsOn: RagDocumentConverterFunction
     Properties:
-      LogGroupName: !Sub "/aws/lambda/${RagPDFConverterFunction}"
+      LogGroupName: !Sub "/aws/lambda/${RagDocumentConverterFunction}"
       RetentionInDays: 30

@@ -3,11 +3,10 @@
 # pdfplumber
 PyMuPDF==1.23.8
 pdfplumber==0.11.4
-camelot-py
-langdetect
+camelot-py==0.11.0
 orjson
-openai>=1.0.0
-PyMuPDF
+langdetect
+
 
 
 
