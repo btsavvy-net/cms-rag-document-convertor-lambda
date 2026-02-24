@@ -29,8 +29,7 @@ class OCRService:
         )
 
         self.lambda_arn = settings.AI_GATEWAY_LAMBDA_ARN
-
-        self.model_name = "gpt-4o"
+        self.model_name = "gpt-4o"  # Vision capable model
 
     # =====================================================
     # PUBLIC ENTRY FUNCTION
@@ -74,7 +73,7 @@ class OCRService:
         return "unknown"
 
     # =====================================================
-    # PDF OCR → Convert Page To Image → Gateway
+    # PDF OCR → Convert Each Page To Image
     # =====================================================
     def _ocr_pdf(self, pdf_bytes: bytes):
         logger.info("Document converter lambda processing scanned PDF")
@@ -94,6 +93,11 @@ class OCRService:
 
                 page_elements = self._send_to_gateway(image_bytes)
 
+                if not page_elements:
+                    logger.warning(
+                        f"Document OCR returned empty text for page {page_index + 1}"
+                    )
+
                 elements.extend(page_elements)
 
         except Exception as e:
@@ -102,17 +106,23 @@ class OCRService:
         return elements
 
     # =====================================================
-    # Image OCR Handler
+    # Image OCR
     # =====================================================
     def _ocr_image(self, image_bytes: bytes):
         logger.info("Document converter lambda processing image OCR")
 
-        return self._send_to_gateway(image_bytes)
+        elements = self._send_to_gateway(image_bytes)
+
+        if not elements:
+            logger.warning("Document OCR returned empty text for image")
+
+        return elements
 
     # =====================================================
-    # Gateway Invocation Layer
+    # Gateway Invocation
     # =====================================================
     def _send_to_gateway(self, image_bytes: bytes):
+
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
         request_body = {
@@ -123,34 +133,30 @@ class OCRService:
             "messages": [
                 {
                     "role": "system",
-                    "content": """
-You are a strict OCR extraction engine.
-
-RULES:
-- Extract ALL readable document text.
-- Return ONLY JSON.
-- Do NOT explain.
-- Do NOT use markdown formatting.
-
-Output format:
-
-{
-  "elements":[
-    {"text":"extracted document text"}
-  ]
-}
-
-If document has no readable text return:
-
-{ "elements":[] }
-"""
+                    "content": (
+                        "You are a strict OCR extraction engine.\n"
+                        "Extract ALL readable document text.\n"
+                        "Return ONLY valid JSON.\n"
+                        "Do NOT explain.\n"
+                        "Do NOT use markdown.\n"
+                        "Output format:\n"
+                        '{ "elements":[ {"text":"extracted text"} ] }\n'
+                        'If no readable text return { "elements":[] }'
+                    ),
                 },
                 {
                     "role": "user",
-                    "content": "Perform OCR extraction."
-                }
+                    "content": [
+                        {"type": "text", "text": "Perform OCR extraction."},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{base64_image}"
+                            },
+                        },
+                    ],
+                },
             ],
-            "image_base64": base64_image
         }
 
         payload = {
@@ -187,21 +193,25 @@ If document has no readable text return:
             result = json.loads(raw_payload)
 
             if result.get("statusCode") != 200:
-                logger.error("Document OCR gateway returned non-200 status")
+                logger.error(
+                    f"Document OCR gateway non-200 status | {result.get('statusCode')}"
+                )
                 return []
 
             body = json.loads(result.get("body", "{}"))
-
             choices = body.get("choices", [])
 
             if not choices:
+                logger.warning("Document OCR gateway returned no choices")
                 return []
 
             content = choices[0].get("message", {}).get("content", "").strip()
 
             if not content:
+                logger.warning("Document OCR model returned empty content")
                 return []
 
+            # Remove markdown fences if model adds them
             if content.startswith("```"):
                 content = content.replace("```json", "")
                 content = content.replace("```", "")
@@ -210,6 +220,7 @@ If document has no readable text return:
             parsed = json.loads(content)
 
             if not isinstance(parsed, dict):
+                logger.warning("Document OCR returned non-dict JSON")
                 return []
 
             return parsed.get("elements", [])
