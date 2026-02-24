@@ -14,6 +14,7 @@ import json
 import base64
 import boto3
 import mimetypes
+from typing import List, Dict
 
 from core.logging import setup_logger
 from core.settings import settings
@@ -34,7 +35,7 @@ class OCRService:
     # =====================================================
     # PUBLIC ENTRY FUNCTION
     # =====================================================
-    def extract_text(self, file_bytes: bytes, filename: str):
+    def extract_text(self, file_bytes: bytes, filename: str) -> List[Dict]:
         """
         Auto detect document type and perform OCR.
 
@@ -53,7 +54,7 @@ class OCRService:
             return self._ocr_pdf(file_bytes)
 
         if file_type in ["jpg", "jpeg", "png"]:
-            return self._ocr_image(file_bytes)
+            return self._ocr_image(file_bytes, filename)
 
         logger.error(f"Unsupported document format | filename={filename}")
         return []
@@ -61,7 +62,7 @@ class OCRService:
     # =====================================================
     # File Type Detection
     # =====================================================
-    def _detect_file_type(self, filename: str):
+    def _detect_file_type(self, filename: str) -> str:
         mime, _ = mimetypes.guess_type(filename)
 
         if mime == "application/pdf":
@@ -75,10 +76,10 @@ class OCRService:
     # =====================================================
     # PDF OCR → Convert Each Page To Image
     # =====================================================
-    def _ocr_pdf(self, pdf_bytes: bytes):
+    def _ocr_pdf(self, pdf_bytes: bytes) -> List[Dict]:
         logger.info("Document converter lambda processing scanned PDF")
 
-        import fitz
+        import fitz  # PyMuPDF
 
         elements = []
 
@@ -91,7 +92,10 @@ class OCRService:
                 pix = page.get_pixmap(dpi=200)
                 image_bytes = pix.tobytes("png")
 
-                page_elements = self._send_to_gateway(image_bytes)
+                page_elements = self._send_to_gateway(
+                    image_bytes=image_bytes,
+                    mime_type="image/png"
+                )
 
                 if not page_elements:
                     logger.warning(
@@ -108,10 +112,18 @@ class OCRService:
     # =====================================================
     # Image OCR
     # =====================================================
-    def _ocr_image(self, image_bytes: bytes):
+    def _ocr_image(self, image_bytes: bytes, filename: str) -> List[Dict]:
         logger.info("Document converter lambda processing image OCR")
 
-        elements = self._send_to_gateway(image_bytes)
+        mime_type, _ = mimetypes.guess_type(filename)
+
+        if not mime_type:
+            mime_type = "image/png"
+
+        elements = self._send_to_gateway(
+            image_bytes=image_bytes,
+            mime_type=mime_type
+        )
 
         if not elements:
             logger.warning("Document OCR returned empty text for image")
@@ -121,7 +133,7 @@ class OCRService:
     # =====================================================
     # Gateway Invocation
     # =====================================================
-    def _send_to_gateway(self, image_bytes: bytes):
+    def _send_to_gateway(self, image_bytes: bytes, mime_type: str) -> List[Dict]:
 
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
@@ -151,7 +163,7 @@ class OCRService:
                         {
                             "type": "image_url",
                             "image_url": {
-                                "url": f"data:image/png;base64,{base64_image}"
+                                "url": f"data:{mime_type};base64,{base64_image}"
                             },
                         },
                     ],
@@ -205,11 +217,13 @@ class OCRService:
                 logger.warning("Document OCR gateway returned no choices")
                 return []
 
-            content = choices[0].get("message", {}).get("content", "").strip()
+            content = choices[0].get("message", {}).get("content", "")
 
             if not content:
                 logger.warning("Document OCR model returned empty content")
                 return []
+
+            content = content.strip()
 
             # Remove markdown fences if model adds them
             if content.startswith("```"):
