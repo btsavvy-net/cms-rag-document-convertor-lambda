@@ -23,8 +23,8 @@ Parameters:
 Mappings:
   EnvMap:
     Dev:
-      PDFSQSARN: arn:aws:sqs:us-east-2:395060586703:rag-dev-converter-pdf
-      DLQARN: arn:aws:sqs:us-east-2:395060586703:rag-dev-converter-pdf-dlq
+      PDFSQSARN: arn:aws:sqs:us-east-2:395060586703:rag-dev-converter-ocr
+      DLQARN: arn:aws:sqs:us-east-2:395060586703:rag-dev-converter-ocr-dlq
       DYNAMODBTABLENAME: RAG_DOCS
       DOCSTABLEARN: arn:aws:dynamodb:us-east-2:395060586703:table/RAG_DOCS
       RAWBUCKETNAME: rag-ingestion-raw-dev
@@ -36,8 +36,8 @@ Mappings:
 
 
     QA:
-      PDFSQSARN: arn:aws:sqs:us-east-2:395060586703:rag-dev-converter-ocr
-      DLQARN: arn:aws:sqs:us-east-2:395060586703:rag-qa-converter-pdf-dlq
+      PDFSQSARN: arn:aws:sqs:us-east-2:395060586703:rag-qa-converter-ocr
+      DLQARN: arn:aws:sqs:us-east-2:395060586703:rag-qa-converter-ocr-dlq
       DYNAMODBTABLENAME: RAG_DOCS
       DOCSTABLEARN: arn:aws:dynamodb:us-east-2:395060586703:table/RAG_DOCS
       RAWBUCKETNAME: rag-ingestion-raw-qa
