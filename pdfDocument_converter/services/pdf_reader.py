@@ -1,47 +1,40 @@
 """
 pdf_reader.py
 
+Document Converter Lambda Reader Engine
+
 Responsibilities:
-- Open a PDF
-- Read text page by page
-- If native text exists → use normal extraction
-- If page is scanned (no real text layer) → run OCR using OpenAI
-- Return IR-compliant elements
+- Read document (PDF scanned / native)
+- Extract native text when available
+- Run OCR when scanned document detected
+- Generate IR compatible elements
 """
 
-import fitz  # PyMuPDF
+import fitz
 import hashlib
 from datetime import datetime, timezone
 
 from core.logging import setup_logger
 from services.ocr_service import OCRService
 
-logger = setup_logger(__name__)
+logger = setup_logger("document_converter_lambda_pdf_reader")
 
-# Initialize OCR service once (reuse across pages)
+# OCR Service Singleton
 ocr_service = OCRService()
 
 
-# ==============================
-# Utility: Generate Text Hash
-# ==============================
+# ======================================================
+# Utility Functions
+# ======================================================
+
 def generate_hash(text: str) -> str:
-    """
-    Generate a stable SHA-256 hash for the text.
-    Used for deduplication and chunk tracking.
-    """
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-# ==============================
-# Utility: Native PDF Detection
-# ==============================
 def is_native_page(page) -> bool:
     """
-    Determines whether a page contains real extractable text.
-
-    We use word-based detection instead of block.strip()
-    to avoid false positives from hidden OCR layers or metadata.
+    Detect native document page using word-level analysis.
+    Prevents false OCR detection.
     """
 
     words = page.get_text("words")
@@ -49,61 +42,59 @@ def is_native_page(page) -> bool:
     if not words:
         return False
 
-    # Count total characters across all detected words
     total_chars = sum(len(w[4]) for w in words if w[4].strip())
 
     logger.debug(
-        f"Page word count: {len(words)}, total characters: {total_chars}"
+        f"Document page analysis | words={len(words)} | chars={total_chars}"
     )
 
-    # Threshold prevents false native detection
     return total_chars > 100
 
 
-# ==============================
-# Main PDF Reader
-# ==============================
+# ======================================================
+# Main Document Reader
+# ======================================================
+
 def read_pdf(pdf_bytes: bytes, tenant_id: str, doc_id: str):
     """
-    Extracts text from a PDF and returns IR elements.
+    Hybrid Document Reader
 
-    Hybrid Logic:
-    - If page has real native text → extract normally
-    - If page has no meaningful text → run OCR
+    Supports:
+    - Native PDF text extraction
+    - OCR scanning pipeline
+    - JPG / PNG document ingestion (via OCR service)
     """
 
-    logger.info("Opening PDF document")
+    logger.info("Opening document inside document converter lambda")
 
     try:
         pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
     except Exception as e:
-        logger.error(f"Failed to open PDF: {str(e)}")
+        logger.error(f"Document open failed | error={str(e)}")
         raise
 
     extracted_elements = []
     element_counter = 1
 
     total_pages = pdf_document.page_count
-    logger.info(f"Total pages in PDF: {total_pages}")
+    logger.info(f"Total pages in document: {total_pages}")
 
     for page_index in range(total_pages):
         try:
             page = pdf_document.load_page(page_index)
             page_number = page_index + 1
 
-            logger.info(f"Processing page {page_number}")
+            logger.info(f"Processing document page {page_number}")
 
-            # ============================
-            # Native Text Detection
-            # ============================
             has_native_text = is_native_page(page)
 
-            # ============================
-            # CASE 1: Native PDF Page
-            # ============================
+            # ==================================================
+            # Native Document Page
+            # ==================================================
             if has_native_text:
+
                 logger.info(
-                    f"Page {page_number} detected as native text page"
+                    f"Document page {page_number} detected as native text page"
                 )
 
                 text_blocks = page.get_text("blocks")
@@ -137,31 +128,33 @@ def read_pdf(pdf_bytes: bytes, tenant_id: str, doc_id: str):
                     extracted_elements.append(element)
                     element_counter += 1
 
-            # ============================
-            # CASE 2: Scanned Page → OCR
-            # ============================
+            # ==================================================
+            # Scanned Document Page → OCR Pipeline
+            # ==================================================
             else:
+
                 logger.warning(
-                    f"Page {page_number} detected as scanned page. Running OCR..."
+                    f"Document page {page_number} detected as scanned page. Running OCR..."
                 )
 
                 try:
-                    # Convert page to image
                     pix = page.get_pixmap(dpi=200)
                     image_bytes = pix.tobytes("png")
 
-                    # Call OCR service
-                    ocr_results = ocr_service.extract_text_from_image(
-                        image_bytes
+                    # ⭐ Correct OCR Service Call
+                    ocr_results = ocr_service.extract_text(
+                        image_bytes,
+                        filename="document_page.png"
                     )
 
                     if not ocr_results:
                         logger.warning(
-                            f"OCR returned no text for page {page_number}"
+                            f"OCR returned empty document text for page {page_number}"
                         )
                         continue
 
                     for ocr_block in ocr_results:
+
                         text = ocr_block.get("text", "").strip()
 
                         if not text:
@@ -175,7 +168,7 @@ def read_pdf(pdf_bytes: bytes, tenant_id: str, doc_id: str):
                             "text": text,
                             "page": page_number,
                             "slide": None,
-                            "bbox": None,  # OCR pages do not have bbox
+                            "bbox": None,
                             "lang": "en",
                             "table_html": None,
                             "hash": generate_hash(text),
@@ -186,23 +179,25 @@ def read_pdf(pdf_bytes: bytes, tenant_id: str, doc_id: str):
                         element_counter += 1
 
                     logger.info(
-                        f"OCR completed successfully for page {page_number}"
+                        f"Document OCR completed for page {page_number}"
                     )
 
                 except Exception as ocr_error:
                     logger.error(
-                        f"OCR failed for page {page_number}: {str(ocr_error)}"
+                        f"Document OCR failed | page={page_number} | error={str(ocr_error)}"
                     )
                     raise
 
         except Exception as page_error:
             logger.error(
-                f"Error processing page {page_index + 1}: {str(page_error)}"
+                f"Document processing error | page={page_index + 1} | error={str(page_error)}"
             )
             raise
 
     pdf_document.close()
 
-    logger.info(f"Total extracted elements: {len(extracted_elements)}")
+    logger.info(
+        f"Total document IR elements extracted: {len(extracted_elements)}"
+    )
 
     return extracted_elements

@@ -1,11 +1,12 @@
 """
 ocr_service.py
 
-Production OCR Service Supporting:
+Production OCR Service
 
+Supports:
 - PDF scanned document OCR
 - JPG / JPEG / PNG OCR
-- File type auto detection
+- Auto file type detection
 - IR compatible output
 """
 
@@ -14,12 +15,10 @@ import base64
 import boto3
 import mimetypes
 
-import fitz  # PyMuPDF
-
 from core.logging import setup_logger
 from core.settings import settings
 
-logger = setup_logger(__name__)
+logger = setup_logger("document_converter_lambda_ocr_service")
 
 
 class OCRService:
@@ -33,12 +32,12 @@ class OCRService:
 
         self.model_name = "gpt-4o"
 
-    # =========================================================
-    # Public OCR Entry Function
-    # =========================================================
+    # =====================================================
+    # PUBLIC ENTRY FUNCTION
+    # =====================================================
     def extract_text(self, file_bytes: bytes, filename: str):
         """
-        Auto detect file type and perform OCR.
+        Auto detect document type and perform OCR.
 
         Supports:
         - PDF
@@ -47,23 +46,22 @@ class OCRService:
         - PNG
         """
 
-        logger.info(f"OCR Processing started | file={filename}")
+        logger.info(f"Document OCR processing started | file={filename}")
 
         file_type = self._detect_file_type(filename)
 
         if file_type == "pdf":
             return self._ocr_pdf(file_bytes)
 
-        elif file_type in ["jpg", "jpeg", "png"]:
+        if file_type in ["jpg", "jpeg", "png"]:
             return self._ocr_image(file_bytes)
 
-        else:
-            logger.error(f"Unsupported file type: {filename}")
-            return []
+        logger.error(f"Unsupported document format | filename={filename}")
+        return []
 
-    # =========================================================
+    # =====================================================
     # File Type Detection
-    # =========================================================
+    # =====================================================
     def _detect_file_type(self, filename: str):
         mime, _ = mimetypes.guess_type(filename)
 
@@ -75,11 +73,13 @@ class OCRService:
 
         return "unknown"
 
-    # =========================================================
-    # PDF OCR → Convert Each Page To Image
-    # =========================================================
+    # =====================================================
+    # PDF OCR → Convert Page To Image → Gateway
+    # =====================================================
     def _ocr_pdf(self, pdf_bytes: bytes):
-        logger.info("Processing scanned PDF OCR")
+        logger.info("Document converter lambda processing scanned PDF")
+
+        import fitz
 
         elements = []
 
@@ -97,21 +97,21 @@ class OCRService:
                 elements.extend(page_elements)
 
         except Exception as e:
-            logger.error(f"PDF OCR failed: {str(e)}")
+            logger.error(f"PDF OCR failed | error={str(e)}")
 
         return elements
 
-    # =========================================================
-    # Image OCR
-    # =========================================================
+    # =====================================================
+    # Image OCR Handler
+    # =====================================================
     def _ocr_image(self, image_bytes: bytes):
-        logger.info("Processing image OCR")
+        logger.info("Document converter lambda processing image OCR")
 
         return self._send_to_gateway(image_bytes)
 
-    # =========================================================
+    # =====================================================
     # Gateway Invocation Layer
-    # =========================================================
+    # =====================================================
     def _send_to_gateway(self, image_bytes: bytes):
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
@@ -127,20 +127,20 @@ class OCRService:
 You are a strict OCR extraction engine.
 
 RULES:
-- Extract ALL readable text from image.
+- Extract ALL readable document text.
 - Return ONLY JSON.
 - Do NOT explain.
-- Do NOT return markdown.
+- Do NOT use markdown formatting.
 
 Output format:
 
 {
   "elements":[
-    {"text":"extracted text"}
+    {"text":"extracted document text"}
   ]
 }
 
-If no text exists return:
+If document has no readable text return:
 
 { "elements":[] }
 """
@@ -181,11 +181,13 @@ If no text exists return:
             raw_payload = response["Payload"].read()
 
             if not raw_payload:
+                logger.warning("Document OCR gateway returned empty response")
                 return []
 
             result = json.loads(raw_payload)
 
             if result.get("statusCode") != 200:
+                logger.error("Document OCR gateway returned non-200 status")
                 return []
 
             body = json.loads(result.get("body", "{}"))
@@ -213,5 +215,5 @@ If no text exists return:
             return parsed.get("elements", [])
 
         except Exception as e:
-            logger.error(f"OCR gateway call failed: {str(e)}")
+            logger.error(f"Document OCR gateway call failed | error={str(e)}")
             return []
