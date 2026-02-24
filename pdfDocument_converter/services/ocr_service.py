@@ -137,6 +137,7 @@ class OCRService:
 
         base64_image = base64.b64encode(image_bytes).decode("utf-8")
 
+        # ✅ Modified request format (safe for chat/completions)
         request_body = {
             "model_provider": "openai",
             "model_name": self.model_name,
@@ -151,21 +152,19 @@ class OCRService:
                         "Return ONLY valid JSON.\n"
                         "Do NOT explain.\n"
                         "Do NOT use markdown.\n"
-                        "Output format:\n"
-                        '{ "elements":[ {"text":"extracted text"} ] }\n'
+                        'Output format: { "elements":[ {"text":"extracted text"} ] }\n'
                         'If no readable text return { "elements":[] }'
                     ),
                 },
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": "Perform OCR extraction."},
                         {
                             "type": "image_url",
                             "image_url": {
                                 "url": f"data:{mime_type};base64,{base64_image}"
                             },
-                        },
+                        }
                     ],
                 },
             ],
@@ -206,7 +205,7 @@ class OCRService:
 
             if result.get("statusCode") != 200:
                 logger.error(
-                    f"Document OCR gateway non-200 status | {result.get('statusCode')}"
+                    f"OCR gateway non-200 | status={result.get('statusCode')} | body={result.get('body')}"
                 )
                 return []
 
