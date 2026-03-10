@@ -8,7 +8,7 @@ orjson
 langdetect
 litellm
 requests
-DeepSeek V3.2
+
 
 
 
