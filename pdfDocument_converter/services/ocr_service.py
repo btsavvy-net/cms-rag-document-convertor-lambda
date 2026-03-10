@@ -14,8 +14,10 @@ import json
 import base64
 import boto3
 import mimetypes
+import os
 from typing import List, Dict
 
+from litellm import completion
 from core.logging import setup_logger
 from core.settings import settings
 
@@ -24,13 +26,31 @@ logger = setup_logger("document_converter_lambda_ocr_service")
 
 class OCRService:
     def __init__(self):
-        self.lambda_client = boto3.client(
-            "lambda",
+        """
+        Initialize OCR service.
+
+        - Uses AWS Secrets Manager for OpenRouter key
+        - Uses LiteLLM for LLM calls
+        - Uses DeepSeek V3.2 model
+        """
+
+        # Model configurable via environment variable
+        self.model_name = os.getenv(
+            "LLM_MODEL",
+            "openrouter/deepseek/deepseek-v3.2"
+        )
+
+        # AWS Secrets Manager client
+        self.secrets_client = boto3.client(
+            "secretsmanager",
             region_name=settings.AWS_REGION,
         )
 
-        self.lambda_arn = settings.AI_GATEWAY_LAMBDA_ARN
-        self.model_name = "gpt-4o"  # Vision capable model
+        # Secret name
+        self.secret_name = os.getenv(
+            "OPENAI_SECRET_NAME",
+            "openrouter/contract/key"
+        )
 
     # =====================================================
     # PUBLIC ENTRY FUNCTION
@@ -74,10 +94,11 @@ class OCRService:
         return "unknown"
 
     # =====================================================
-    # PDF OCR → Convert Each Page To Image
+    # PDF OCR
     # =====================================================
     def _ocr_pdf(self, pdf_bytes: bytes) -> List[Dict]:
-        logger.info("Document converter lambda processing scanned PDF")
+
+        logger.info("Processing scanned PDF for OCR")
 
         import fitz  # PyMuPDF
 
@@ -87,9 +108,13 @@ class OCRService:
             doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
             for page_index in range(len(doc)):
+
+                logger.info(f"OCR processing page {page_index + 1}")
+
                 page = doc.load_page(page_index)
 
                 pix = page.get_pixmap(dpi=200)
+
                 image_bytes = pix.tobytes("png")
 
                 page_elements = self._send_to_gateway(
@@ -99,7 +124,7 @@ class OCRService:
 
                 if not page_elements:
                     logger.warning(
-                        f"Document OCR returned empty text for page {page_index + 1}"
+                        f"OCR returned empty text for page {page_index + 1}"
                     )
 
                 elements.extend(page_elements)
@@ -110,10 +135,11 @@ class OCRService:
         return elements
 
     # =====================================================
-    # Image OCR
+    # IMAGE OCR
     # =====================================================
     def _ocr_image(self, image_bytes: bytes, filename: str) -> List[Dict]:
-        logger.info("Document converter lambda processing image OCR")
+
+        logger.info("Processing image OCR")
 
         mime_type, _ = mimetypes.guess_type(filename)
 
@@ -126,105 +152,120 @@ class OCRService:
         )
 
         if not elements:
-            logger.warning("Document OCR returned empty text for image")
+            logger.warning("OCR returned empty text for image")
 
         return elements
 
     # =====================================================
-    # Gateway Invocation
+    # SECRET FETCHING
     # =====================================================
-    def _send_to_gateway(self, image_bytes: bytes, mime_type: str) -> List[Dict]:
-
-        base64_image = base64.b64encode(image_bytes).decode("utf-8")
-
-        # ✅ Modified request format (safe for chat/completions)
-        request_body = {
-            "model_provider": "openai",
-            "model_name": self.model_name,
-            "temperature": 0.0,
-            "max_tokens": 4096,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a strict OCR extraction engine.\n"
-                        "Extract ALL readable document text.\n"
-                        "Return ONLY valid JSON.\n"
-                        "Do NOT explain.\n"
-                        "Do NOT use markdown.\n"
-                        'Output format: { "elements":[ {"text":"extracted text"} ] }\n'
-                        'If no readable text return { "elements":[] }'
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{mime_type};base64,{base64_image}"
-                            },
-                        }
-                    ],
-                },
-            ],
-        }
-
-        payload = {
-            "version": "2.0",
-            "routeKey": "POST /v1/chat/completions",
-            "rawPath": "/v1/chat/completions",
-            "headers": {
-                "accept": "application/json",
-                "content-type": "application/json",
-            },
-            "requestContext": {
-                "http": {
-                    "method": "POST",
-                    "path": "/v1/chat/completions",
-                }
-            },
-            "body": json.dumps(request_body),
-            "isBase64Encoded": False,
-        }
+    def _get_openai_key(self) -> str:
+        """
+        Fetch OpenRouter API key from AWS Secrets Manager.
+        Supports multiple secret formats.
+        """
 
         try:
-            response = self.lambda_client.invoke(
-                FunctionName=self.lambda_arn,
-                InvocationType="RequestResponse",
-                Payload=json.dumps(payload),
+
+            logger.info("Fetching API key from Secrets Manager")
+
+            response = self.secrets_client.get_secret_value(
+                SecretId=self.secret_name
             )
 
-            raw_payload = response["Payload"].read()
+            secret_string = response.get("SecretString")
 
-            if not raw_payload:
-                logger.warning("Document OCR gateway returned empty response")
-                return []
-
-            result = json.loads(raw_payload)
-
-            if result.get("statusCode") != 200:
-                logger.error(
-                    f"OCR gateway non-200 | status={result.get('statusCode')} | body={result.get('body')}"
+            if not secret_string:
+                raise ValueError(
+                    f"Secret '{self.secret_name}' does not contain SecretString"
                 )
-                return []
 
-            body = json.loads(result.get("body", "{}"))
-            choices = body.get("choices", [])
+            # Support JSON secrets
+            try:
 
-            if not choices:
-                logger.warning("Document OCR gateway returned no choices")
-                return []
+                secret_json = json.loads(secret_string)
 
-            content = choices[0].get("message", {}).get("content", "")
+                api_key = (
+                    secret_json.get("OPENROUTER_API_KEY")
+                    or secret_json.get("api_key")
+                    or secret_json.get("key")
+                )
+
+                if api_key:
+                    return api_key
+
+            except json.JSONDecodeError:
+                pass
+
+            # Support plain text secrets
+            return secret_string.strip()
+
+        except Exception as e:
+            logger.error(f"Failed to retrieve API key | error={str(e)}")
+            raise
+
+    # =====================================================
+    # LLM OCR CALL
+    # =====================================================
+    def _send_to_gateway(self, image_bytes: bytes, mime_type: str) -> List[Dict]:
+        """
+        NOTE:
+        Method name retained to avoid breaking other files.
+        Internally calls DeepSeek via OpenRouter.
+        """
+
+        try:
+
+            logger.info("Preparing image for OCR model")
+
+            base64_image = base64.b64encode(image_bytes).decode("utf-8")
+
+            api_key = self._get_openai_key()
+
+            logger.info("Calling DeepSeek V3.2 via OpenRouter")
+
+            response = completion(
+                model=self.model_name,
+                api_key=api_key,
+                api_base="https://openrouter.ai/api/v1",
+                temperature=0.0,
+                max_tokens=4096,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a strict OCR extraction engine.\n"
+                            "Extract ALL readable document text.\n"
+                            "Return ONLY valid JSON.\n"
+                            "Do NOT explain.\n"
+                            "Do NOT use markdown.\n"
+                            'Output format: { "elements":[ {"text":"extracted text"} ] }\n'
+                            'If no readable text return { "elements":[] }'
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{mime_type};base64,{base64_image}"
+                                },
+                            }
+                        ],
+                    },
+                ],
+            )
+
+            content = response["choices"][0]["message"]["content"]
 
             if not content:
-                logger.warning("Document OCR model returned empty content")
+                logger.warning("Model returned empty content")
                 return []
 
             content = content.strip()
 
-            # Remove markdown fences if model adds them
+            # Remove markdown if model adds it
             if content.startswith("```"):
                 content = content.replace("```json", "")
                 content = content.replace("```", "")
@@ -233,11 +274,15 @@ class OCRService:
             parsed = json.loads(content)
 
             if not isinstance(parsed, dict):
-                logger.warning("Document OCR returned non-dict JSON")
+                logger.warning("OCR returned non-dict JSON")
                 return []
+
+            logger.info("OCR extraction successful")
 
             return parsed.get("elements", [])
 
         except Exception as e:
-            logger.error(f"Document OCR gateway call failed | error={str(e)}")
+
+            logger.error(f"OCR LLM call failed | error={str(e)}")
+
             return []

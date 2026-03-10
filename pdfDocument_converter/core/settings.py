@@ -1,4 +1,5 @@
 import os
+
 # from dotenv import load_dotenv
 
 # Load .env only locally
@@ -21,10 +22,13 @@ MAX_PDF_PAGES = int(os.getenv("MAX_PDF_PAGES", "500"))
 IR_SCHEMA_VERSION = os.getenv("IR_SCHEMA_VERSION", "ir_v1")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 WRITE_MD_SIDECAR = os.getenv("WRITE_MD_SIDECAR", "false").lower() == "true"
-# ✅ ADD THIS LINE ONLY
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-AI_GATEWAY_LAMBDA_ARN = os.getenv("AI_GATEWAY_LAMBDA_ARN", "")
 
+# 🔹 NEW — Secret Name (NOT the key itself)
+OPENAI_SECRET_NAME = os.getenv("OPENAI_SECRET_NAME", "openrouter/contract/key")
+
+# 🔹 OLD (kept but not used anymore)
+# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# AI_GATEWAY_LAMBDA_ARN = os.getenv("AI_GATEWAY_LAMBDA_ARN", "")
 
 
 class Settings:
@@ -38,10 +42,13 @@ class Settings:
     IR_SCHEMA_VERSION = IR_SCHEMA_VERSION
     LOG_LEVEL = LOG_LEVEL
     WRITE_MD_SIDECAR = WRITE_MD_SIDECAR
-# ✅ ADD THIS ALSO
-    OPENAI_API_KEY = OPENAI_API_KEY
-    AI_GATEWAY_LAMBDA_ARN = AI_GATEWAY_LAMBDA_ARN
 
+    # ✅ NEW — Used by OCRService to fetch secret
+    OPENAI_SECRET_NAME = OPENAI_SECRET_NAME
+
+    # 🔹 OLD (kept for safety but not used)
+    # OPENAI_API_KEY = OPENAI_API_KEY
+    # AI_GATEWAY_LAMBDA_ARN = AI_GATEWAY_LAMBDA_ARN
 
 
 settings = Settings()

@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  PDF Doument Converter Lambda (Python)
+  PDF Document Converter Lambda (Python)
 
 Globals:
   Function:
@@ -32,8 +32,6 @@ Mappings:
       PROCESSEDBUCKETNAME: rag-dev-rag-processed
       PROCESSEDBUCKETARN: arn:aws:s3:::rag-dev-rag-processed/*
       SNSTOPICARN: arn:aws:sns:us-east-2:395060586703:rag-dev-chunk-request
-      AIGATEWAYLAMBDAARN: arn:aws:lambda:us-east-2:395060586703:function:AIGateway-Dev
-
 
     QA:
       PDFSQSARN: arn:aws:sqs:us-east-2:395060586703:rag-qa-converter-ocr
@@ -45,7 +43,6 @@ Mappings:
       PROCESSEDBUCKETNAME: rag-dev-rag-processed-qa
       PROCESSEDBUCKETARN: arn:aws:s3:::rag-dev-rag-processed-qa/*
       SNSTOPICARN: arn:aws:sns:us-east-2:395060586703:rag-qa-chunk-request
-      AIGATEWAYLAMBDAARN: arn:aws:lambda:us-east-2:395060586703:function:AIGateway-qa
 
 Resources:
 
@@ -57,19 +54,28 @@ Resources:
       PackageType: Zip
       CodeUri: pdfDocument_converter/
       Handler: main.handler
+
       DeadLetterQueue:
         Type: SQS
         TargetArn: !FindInMap [EnvMap, !Ref StageName, DLQARN]
+
       Environment:
         Variables:
+
           RAW_BUCKET_NAME: !FindInMap [EnvMap, !Ref StageName, RAWBUCKETNAME]
           PROCESSED_BUCKET_NAME: !FindInMap [EnvMap, !Ref StageName, PROCESSEDBUCKETNAME]
           DYNAMODB_TABLE_NAME: !FindInMap [EnvMap, !Ref StageName, DYNAMODBTABLENAME]
-          # MAX_PDF_PAGES: 2000
+
           IR_SCHEMA_VERSION: ir_v1
           WRITE_MD_SIDECAR: false
+
           SNS_TOPIC_ARN: !FindInMap [EnvMap, !Ref StageName, SNSTOPICARN]
-          AI_GATEWAY_LAMBDA_ARN: !FindInMap [EnvMap, !Ref StageName, AIGATEWAYLAMBDAARN]
+
+          # Secret storing OpenRouter API key
+          OPENAI_SECRET_NAME: openrouter/contract/key
+
+          # ⭐ Dynamic LLM model (Manager requirement)
+          LLM_MODEL: openrouter/deepseek/deepseek-v3.2
 
       Events:
         PDFSQSEvent:
@@ -80,6 +86,11 @@ Resources:
 
       Policies:
         - Statement:
+
+            ###################################################################
+            # SQS PERMISSIONS
+            ###################################################################
+
             - Sid: SQSAccess
               Effect: Allow
               Action:
@@ -88,11 +99,21 @@ Resources:
                 - sqs:GetQueueAttributes
                 - sqs:GetQueueUrl
               Resource: !FindInMap [EnvMap, !Ref StageName, PDFSQSARN]
+
+            ###################################################################
+            # SNS PERMISSIONS
+            ###################################################################
+
             - Sid: SNSPublish
               Effect: Allow
               Action:
                 - sns:Publish
               Resource: !FindInMap [EnvMap, !Ref StageName, SNSTOPICARN]
+
+            ###################################################################
+            # DYNAMODB PERMISSIONS
+            ###################################################################
+
             - Sid: DynamoDBAccess
               Effect: Allow
               Action:
@@ -102,6 +123,11 @@ Resources:
                 - dynamodb:Query
               Resource:
                 - !FindInMap [EnvMap, !Ref StageName, DOCSTABLEARN]
+
+            ###################################################################
+            # S3 PERMISSIONS
+            ###################################################################
+
             - Sid: S3Access
               Effect: Allow
               Action:
@@ -112,11 +138,16 @@ Resources:
               Resource:
                 - !FindInMap [EnvMap, !Ref StageName, RAWBUCKETARN]
                 - !FindInMap [EnvMap, !Ref StageName, PROCESSEDBUCKETARN]
-            - Sid: InvokeAIGatewayLambda
+
+            ###################################################################
+            # SECRETS MANAGER PERMISSIONS
+            ###################################################################
+
+            - Sid: SecretsManagerAccess
               Effect: Allow
               Action:
-              - lambda:InvokeFunction
-              Resource: !FindInMap [EnvMap, !Ref StageName, AIGATEWAYLAMBDAARN]
+                - secretsmanager:GetSecretValue
+              Resource: arn:aws:secretsmanager:us-east-2:395060586703:secret:openrouter/contract/key*
 
   RagDocumentConverterFunctionLogGroup:
     Type: AWS::Logs::LogGroup
