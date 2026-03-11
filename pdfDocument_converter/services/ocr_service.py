@@ -31,13 +31,13 @@ class OCRService:
 
         - Uses AWS Secrets Manager for OpenRouter key
         - Uses LiteLLM for LLM calls
-        - Uses DeepSeek V3.2 model
+        - Uses GPT-4o vision model
         """
 
         # Model configurable via environment variable
         self.model_name = os.getenv(
             "LLM_MODEL",
-            "openrouter/deepseek/deepseek-v3.2"
+            "openrouter/openai/gpt-4o"
         )
 
         # AWS Secrets Manager client
@@ -211,7 +211,7 @@ class OCRService:
         """
         NOTE:
         Method name retained to avoid breaking other files.
-        Internally calls DeepSeek via OpenRouter.
+        Internally calls GPT-4o via OpenRouter.
         """
 
         try:
@@ -222,7 +222,7 @@ class OCRService:
 
             api_key = self._get_openai_key()
 
-            logger.info("Calling DeepSeek V3.2 via OpenRouter")
+            logger.info("Calling GPT-4o via OpenRouter")
 
             response = completion(
                 model=self.model_name,

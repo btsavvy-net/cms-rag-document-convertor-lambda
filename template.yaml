@@ -75,7 +75,7 @@ Resources:
           OPENAI_SECRET_NAME: openrouter/contract/key
 
           # ⭐ Dynamic LLM model (Manager requirement)
-          LLM_MODEL: openrouter/deepseek/deepseek-v3.2
+          LLM_MODEL: openrouter/openai/gpt-4o-mini
 
       Events:
         PDFSQSEvent:
